@@ -893,6 +893,12 @@ async function loadMatches() {
         }
 
         const groups = normalizeGroups(data);
+        // Ensure living_group (🔴) always takes priority during dedup
+        groups.sort((a, b) => {
+            const aLive = a.title.startsWith('🔴') ? 1 : 0;
+            const bLive = b.title.startsWith('🔴') ? 1 : 0;
+            return bLive - aLive; // living groups sort first
+        });
         // Dedup: track seen competition names + match IDs per day
         const seenComp = new Set();
         const seenMatch = new Set();
@@ -937,6 +943,34 @@ async function loadMatches() {
     });
 
     render(dayGroups, days);
+
+    // Update overlay for currently playing match (scores may have changed)
+    if (activeMatchId && document.getElementById('match-overlay').style.display === 'flex') {
+        updateActiveMatchOverlay(dayGroups);
+    }
+}
+
+function updateActiveMatchOverlay(dayGroups) {
+    for (const day of Object.keys(dayGroups)) {
+        for (const group of dayGroups[day]) {
+            for (const item of group.items) {
+                const matches = item.match || (item.competition && item.competition.match) || [];
+                for (const m of matches) {
+                    if (m && m.id === activeMatchId && m.home_team && m.away_team) {
+                        const homeName = m.home_team.name_en || m.home_team.name || '?';
+                        const awayName = m.away_team.name_en || m.away_team.name || '?';
+                        const homeLogo = m.home_team.logo || '';
+                        const awayLogo = m.away_team.logo || '';
+                        const homeScore = (m.home_scores && m.home_scores[0] != null) ? m.home_scores[0] : '';
+                        const awayScore = (m.away_scores && m.away_scores[0] != null) ? m.away_scores[0] : '';
+                        const scoreStr = (homeScore !== '' && awayScore !== '') ? `${homeScore} - ${awayScore}` : '';
+                        showOverlay(homeName, awayName, homeLogo, awayLogo, scoreStr);
+                        return;
+                    }
+                }
+            }
+        }
+    }
 }
 
 function normalizeGroups(data) {
