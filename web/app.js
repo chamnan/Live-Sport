@@ -12,15 +12,17 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 // ===== UTILS =====
-function formatDisplayDate(yyyymmdd) {
-    const y = yyyymmdd.slice(0, 4);
-    const m = yyyymmdd.slice(4, 6);
-    const d = yyyymmdd.slice(6, 8);
+function formatDisplayDate(dateStr) {
+    // Accept both YYYY-MM-DD and YYYYMMDD
+    const clean = dateStr.replace(/-/g, '');
+    const y = clean.slice(0, 4);
+    const m = clean.slice(4, 6);
+    const d = clean.slice(6, 8);
     const date = new Date(y, m - 1, d);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diff = Math.round((date - today) / 86400000);
-    const label = diff === -1 ? '📅 Yesterday' : diff === 0 ? '📅 Today' : diff === 1 ? '📅 Tomorrow' : yyyymmdd;
+    const label = diff === -1 ? '📅 Yesterday' : diff === 0 ? '📅 Today' : diff === 1 ? '📅 Tomorrow' : dateStr;
     return label + ' — ' + d + '/' + m + '/' + y;
 }
 
@@ -123,21 +125,16 @@ function hideOverlay() {
 }
 
 /**
- * PLAY STREAM
+ * PLAY STREAM — streamUrl is already a direct HLS .m3u8 URL from the API
  */
 async function play(streamUrl, matchId, home, away, homeLogo, awayLogo, scoreStr) {
-    const pr = await fetch(
-        `/api/play-url?u=${encodeURIComponent(streamUrl)}&matchId=${matchId}&home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`
-    );
-    const pj = await pr.json();
-
-    if (!pj.url) return;
+    if (!streamUrl) return;
 
     destroyPlayer();
 
     art = new Artplayer({
         container: '#player',
-        url: pj.url,
+        url: streamUrl,
         isLive: true,
         autoplay: true,
         muted: true,
@@ -164,58 +161,27 @@ async function loadMatches() {
         let data = result[day];
         if (!data || data.error) return;
 
-        // Unwrap extra .data wrapper if present
-        if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
-            data = data.data;
-        }
+        // New format: data.matches is the flat array
+        const matches = data.matches || [];
+        if (matches.length === 0) return;
 
-        const groups = normalizeGroups(data);
-        // Ensure living_group (🔴) always takes priority during dedup
+        const groups = normalizeGroups(matches);
+
+        // Live groups (🔴) sort first, then groups with streams
         groups.sort((a, b) => {
             const aLive = a.title.startsWith('🔴') ? 1 : 0;
             const bLive = b.title.startsWith('🔴') ? 1 : 0;
-            return bLive - aLive; // living groups sort first
-        });
-        // Dedup: track seen competition names + match IDs per day
-        const seenComp = new Set();
-        const seenMatch = new Set();
-        const deduped = [];
-
-        groups.forEach(g => {
-            const compKey = g.competitionName || g.title;
-            if (seenComp.has(compKey)) return; // skip duplicate competition
-            seenComp.add(compKey);
-
-            // Filter items by deduplicating match IDs inside match arrays
-            const uniqueItems = g.items.filter(item => {
-                const matchArr = item.match;
-                if (!Array.isArray(matchArr) || matchArr.length === 0) return true;
-
-                // Keep only matches whose IDs haven't been seen
-                const uniqueMatches = matchArr.filter(m => {
-                    if (!m || !m.id) return true;
-                    if (seenMatch.has(m.id)) return false;
-                    seenMatch.add(m.id);
-                    return true;
-                });
-
-                if (uniqueMatches.length === 0) {
-                    // All matches were duplicates — drop this item entirely
-                    return false;
-                }
-
-                // Mutate item to only contain unique matches
-                item.match = uniqueMatches;
-                return true;
-            });
-
-            if (uniqueItems.length > 0) {
-                deduped.push({ ...g, items: uniqueItems });
-            }
+            if (bLive !== aLive) return bLive - aLive;
+            // Within same live tier, groups with any streamable match first
+            const aHasStream = a.items.some(item => (item.match || []).some(m => m && m.hasStream));
+            const bHasStream = b.items.some(item => (item.match || []).some(m => m && m.hasStream));
+            if (aHasStream && !bHasStream) return -1;
+            if (!aHasStream && bHasStream) return 1;
+            return 0;
         });
 
-        if (deduped.length > 0) {
-            dayGroups[day] = deduped;
+        if (groups.length > 0) {
+            dayGroups[day] = groups;
         }
     });
 
@@ -231,15 +197,15 @@ function updateActiveMatchOverlay(dayGroups) {
     for (const day of Object.keys(dayGroups)) {
         for (const group of dayGroups[day]) {
             for (const item of group.items) {
-                const matches = item.match || (item.competition && item.competition.match) || [];
+                const matches = item.match || [];
                 for (const m of matches) {
-                    if (m && m.id === activeMatchId && m.home_team && m.away_team) {
-                        const homeName = m.home_team.name_en || m.home_team.name || '?';
-                        const awayName = m.away_team.name_en || m.away_team.name || '?';
-                        const homeLogo = m.home_team.logo || '';
-                        const awayLogo = m.away_team.logo || '';
-                        const homeScore = (m.home_scores && m.home_scores[0] != null) ? m.home_scores[0] : '';
-                        const awayScore = (m.away_scores && m.away_scores[0] != null) ? m.away_scores[0] : '';
+                    if (m && m.id === activeMatchId && m.home && m.away) {
+                        const homeName = m.home.name || '?';
+                        const awayName = m.away.name || '?';
+                        const homeLogo = m.home.logo || '';
+                        const awayLogo = m.away.logo || '';
+                        const homeScore = m.home.score != null ? m.home.score : '';
+                        const awayScore = m.away.score != null ? m.away.score : '';
                         const scoreStr = (homeScore !== '' && awayScore !== '') ? `${homeScore} - ${awayScore}` : '';
                         showOverlay(homeName, awayName, homeLogo, awayLogo, scoreStr);
                         return;
@@ -250,56 +216,52 @@ function updateActiveMatchOverlay(dayGroups) {
     }
 }
 
-function normalizeGroups(data) {
+function normalizeGroups(matches) {
+    // Sort flat matches: hasStream first, then live first, then by kickoffAt
+    const sorted = [...matches].sort((a, b) => {
+        if (a.hasStream && !b.hasStream) return -1;
+        if (!a.hasStream && b.hasStream) return 1;
+        if (a.isLive && !b.isLive) return -1;
+        if (!a.isLive && b.isLive) return 1;
+        return (a.kickoffAt || '').localeCompare(b.kickoffAt || '');
+    });
+
+    // Group flat matches by competition name
+    const groupsMap = {};
+
+    sorted.forEach(m => {
+        if (!m || !m.home || !m.away) return;
+
+        const compName = (m.competition && m.competition.name) || 'Other';
+        const isLive = m.isLive;
+
+        // Key combines competition + live status so live matches get their own 🔴 group
+        const key = isLive ? '🔴 ' + compName : compName;
+
+        if (!groupsMap[key]) {
+            groupsMap[key] = {
+                title: isLive ? '🔴 ' + compName : compName,
+                competitionName: compName,
+                isLive: isLive,
+                matches: []
+            };
+        }
+        groupsMap[key].matches.push(m);
+    });
+
+    // Convert map to array of groups
     const groups = [];
-
-    (data.living_group || []).forEach(g => {
+    for (const key of Object.keys(groupsMap)) {
+        const g = groupsMap[key];
         groups.push({
-            title: '🔴 ' + (g.competition?.name_en || 'Live'),
-            competitionName: g.competition?.name_en || '',
-            items: [{ competition: g.competition, match: g.match }]
+            title: g.title,
+            competitionName: g.competitionName,
+            items: [{
+                competition: { name: g.competitionName },
+                match: g.matches
+            }]
         });
-    });
-
-    (data.obs_group || []).forEach(g => {
-        groups.push({
-            title: g.competition?.name_en || '',
-            competitionName: g.competition?.name_en || '',
-            items: [{ competition: g.competition, match: g.match }]
-        });
-    });
-
-    (data.hot_group || []).forEach(g => {
-        groups.push({
-            title: g.competition?.name_en || '',
-            competitionName: g.competition?.name_en || '',
-            items: [{ competition: g.competition, match: g.match }]
-        });
-    });
-
-    (data.category_group || []).forEach(g => {
-        groups.push({
-            title: g.name,
-            competitionName: g.name,
-            items: g.competition_match || []
-        });
-    });
-
-    (data.country_group || []).forEach(g => {
-        groups.push({
-            title: g.country?.name || g.name,
-            competitionName: g.country?.name || g.name || '',
-            items: g.competition_match || []
-        });
-    });
-
-    (data.other_group || []).forEach(g => {
-        groups.push({
-            title: g.competition?.name_en || '',
-            competitionName: g.competition?.name_en || '',
-            items: [{ competition: g.competition, match: g.match }]
-        });
-    });
+    }
 
     return groups;
 }
@@ -364,7 +326,7 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-function buildMatchElement(m, homeName, awayName, homeLogo, awayLogo, scoreStr, matchTime, isLive, compName) {
+function buildMatchElement(m, homeName, awayName, homeLogo, awayLogo, scoreStr, matchTime, isLive, compName, hasStream) {
     const el = document.createElement("div");
     el.className = "match";
     if (m.id === activeMatchId) el.classList.add('active-match');
@@ -377,6 +339,13 @@ function buildMatchElement(m, homeName, awayName, homeLogo, awayLogo, scoreStr, 
         showTooltip(e.touches[0], compName, homeName, awayName, scoreStr, matchTime, isLive);
         setTimeout(hideTooltip, 2000);
     }, { passive: true });
+
+    if (hasStream) {
+        const streamIcon = document.createElement("span");
+        streamIcon.className = "match-stream-icon";
+        streamIcon.innerText = "📡";
+        el.appendChild(streamIcon);
+    }
 
     if (isLive) {
         const dot = document.createElement("span");
@@ -469,26 +438,27 @@ function renderGroup(cat) {
 
         const groupTitle = document.createElement("div");
         groupTitle.className = "group-title";
-        groupTitle.innerText = comp.competition.name_en || comp.competition.name || '';
+        groupTitle.innerText = comp.competition.name || '';
         body.appendChild(groupTitle);
 
         const isLiveGroup = cat.title.startsWith('🔴');
 
-        const matches = comp.match || comp.competition.match || [];
+        const matches = comp.match || [];
         matches.forEach(m => {
-            if (!m || !m.home_team || !m.away_team) return;
+            if (!m || !m.home || !m.away) return;
 
-            const homeName = m.home_team.name_en || m.home_team.name || '?';
-            const awayName = m.away_team.name_en || m.away_team.name || '?';
-            const homeLogo = m.home_team.logo || '';
-            const awayLogo = m.away_team.logo || '';
-            const homeScore = (m.home_scores && m.home_scores[0] != null) ? m.home_scores[0] : '';
-            const awayScore = (m.away_scores && m.away_scores[0] != null) ? m.away_scores[0] : '';
+            const homeName = m.home.name || '?';
+            const awayName = m.away.name || '?';
+            const homeLogo = m.home.logo || '';
+            const awayLogo = m.away.logo || '';
+            const homeScore = m.home.score != null ? m.home.score : '';
+            const awayScore = m.away.score != null ? m.away.score : '';
             const scoreStr = (homeScore !== '' && awayScore !== '') ? `${homeScore} - ${awayScore}` : '';
-            const matchTime = formatMatchTime(m.match_time);
+            const matchTime = formatMatchTime(m.kickoffAt);
+            const isLive = m.isLive;
 
-            const compName = comp.competition.name_en || comp.competition.name || '';
-            const el = buildMatchElement(m, homeName, awayName, homeLogo, awayLogo, scoreStr, matchTime, isLiveGroup, compName);
+            const compName = comp.competition.name || '';
+            const el = buildMatchElement(m, homeName, awayName, homeLogo, awayLogo, scoreStr, matchTime, isLive, compName, m.hasStream);
             attachMatchClick(el, m, homeName, awayName, homeLogo, awayLogo, scoreStr);
             body.appendChild(el);
         });
@@ -511,7 +481,7 @@ function renderDateAccordion(day, groups) {
     body.className = "cat-body";
 
     // Start expanded for today
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const todayStr = new Date().toISOString().slice(0, 10);
     const isToday = day === todayStr;
     if (!isToday) {
         body.style.display = "none";

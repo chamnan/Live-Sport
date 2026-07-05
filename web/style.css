@@ -296,6 +296,13 @@ body {
     animation: pulse 1.5s ease-in-out infinite;
 }
 
+.match-stream-icon {
+    font-size: 11px;
+    flex-shrink: 0;
+    opacity: 0.6;
+    margin-right: 2px;
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
