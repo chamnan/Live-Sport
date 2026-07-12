@@ -68,32 +68,60 @@ function closeSidebar() {
 }
 
 // ===== TIME FORMATTING =====
+
+// Origin timezone offset in hours (UTC+7 for KBS data)
+var ORIGIN_TZ_OFFSET = 7;
+
+// Get the user's current timezone offset in hours (e.g. +7, -5, +1)
+function getUserTzOffset() {
+    return -(new Date().getTimezoneOffset() / 60);
+}
+
+// Get the user's timezone label (e.g. "GMT+7", "GMT-5")
+function getUserTzLabel() {
+    var offset = getUserTzOffset();
+    var sign = offset >= 0 ? '+' : '';
+    return 'GMT' + sign + offset;
+}
+
+function parseAsUTC7(str) {
+    // Append +07:00 so JS Date correctly interprets the string as UTC+7
+    var s = String(str);
+    if (s.match(/T\d{2}:\d{2}/) && !s.match(/[Z+\-]\d{2}:\d{2}$/) && !s.endsWith('Z')) {
+        s = s + '+07:00';
+    }
+    return new Date(s);
+}
+
 function formatMatchTime(raw) {
     if (raw == null || raw === '') return '';
-    let h, m;
+    var d;
     // Unix timestamp (seconds or milliseconds)
     if (typeof raw === 'number') {
-        const d = raw > 1e12 ? new Date(raw) : new Date(raw * 1000);
-        h = d.getHours();
-        m = d.getMinutes();
+        d = raw > 1e12 ? new Date(raw) : new Date(raw * 1000);
     } else {
-        const str = String(raw);
-        // ISO date string like "2026-06-29T14:30:00"
-        const isoMatch = str.match(/T(\d{2}):(\d{2})/);
-        if (isoMatch) {
-            h = parseInt(isoMatch[1], 10);
-            m = parseInt(isoMatch[2], 10);
+        var str = String(raw);
+        // ISO date string like "2026-06-29T14:30:00" — treat as UTC+7
+        if (str.match(/T\d{2}:\d{2}/)) {
+            d = parseAsUTC7(str);
         } else {
-            // Plain time like "14:30" or "14:30:00"
-            const parts = str.split(':');
-            h = parseInt(parts[0], 10);
-            m = parseInt(parts[1], 10);
+            var parts = str.split(':');
+            var h = parseInt(parts[0], 10);
+            var m = parseInt(parts[1], 10);
             if (isNaN(h) || isNaN(m)) return '';
+            var ampm = h >= 12 ? 'PM' : 'AM';
+            var h12 = h % 12 || 12;
+            var mm = String(m).padStart(2, '0');
+            return h12 + ':' + mm + ' ' + ampm;
         }
     }
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const h12 = h % 12 || 12;
-    const mm = String(m).padStart(2, '0');
+    if (isNaN(d.getTime())) return '';
+    // Convert to user's local time using local getHours/getMinutes
+    var h = d.getHours();
+    var m = d.getMinutes();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12 || 12;
+    var mm = String(m).padStart(2, '0');
     return h12 + ':' + mm + ' ' + ampm;
 }
 
