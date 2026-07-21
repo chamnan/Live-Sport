@@ -45,6 +45,29 @@ type FixturesResponse struct {
 	Meta Meta    `json:"meta"`
 }
 
+// UnmarshalJSON handles the case where the API returns "data" as an
+// empty object {} instead of an empty array [] when no fixtures exist.
+func (fr *FixturesResponse) UnmarshalJSON(b []byte) error {
+	type Alias struct {
+		Data json.RawMessage `json:"data"`
+		Meta Meta            `json:"meta"`
+	}
+	var alias Alias
+	if err := json.Unmarshal(b, &alias); err != nil {
+		return err
+	}
+
+	fr.Meta = alias.Meta
+
+	// Try as array first; if that fails, treat it as an empty object → empty slice
+	if err := json.Unmarshal(alias.Data, &fr.Data); err != nil {
+		// If data is an object (e.g. {}), default to empty slice
+		fr.Data = []Match{}
+	}
+
+	return nil
+}
+
 type Meta struct {
 	Date  string `json:"date"`
 	Count int    `json:"count"`
