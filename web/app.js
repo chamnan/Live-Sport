@@ -585,6 +585,49 @@ document.getElementById('sidebar').addEventListener('touchmove', (e) => {
     }
 }, { passive: true });
 
+// ===== REFRESH COUNTDOWN =====
+const REFRESH_INTERVAL = 30; // seconds
+let refreshCountdown = REFRESH_INTERVAL;
+let countdownTimer = null;
+
+function startCountdown() {
+    refreshCountdown = REFRESH_INTERVAL;
+    updateCountdownDisplay();
+
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+        refreshCountdown--;
+        updateCountdownDisplay();
+
+        if (refreshCountdown <= 0) {
+            refreshCountdown = REFRESH_INTERVAL;
+            updateCountdownDisplay();
+            loadMatches();
+        }
+    }, 1000);
+}
+
+function updateCountdownDisplay() {
+    const el = document.getElementById('refresh-indicator');
+    if (!el) return;
+    el.textContent = '🔄 ' + refreshCountdown + 's';
+
+    // Pulse animation when under 10s
+    if (refreshCountdown <= 10) {
+        el.classList.add('countdown-soon');
+    } else {
+        el.classList.remove('countdown-soon');
+    }
+}
+
+function manualRefresh() {
+    refreshCountdown = REFRESH_INTERVAL;
+    updateCountdownDisplay();
+    loadMatches();
+}
+
 // ===== INIT =====
 loadMatches();
-setInterval(loadMatches, 30000);
+startCountdown();
+
+document.getElementById('btn-reload').addEventListener('click', manualRefresh);

@@ -148,6 +148,12 @@ body {
     font-size: 11px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
+    transition: color 0.3s;
+}
+
+#refresh-indicator.countdown-soon {
+    color: var(--accent);
+    animation: pulse 1s ease-in-out infinite;
 }
 
 #status {
