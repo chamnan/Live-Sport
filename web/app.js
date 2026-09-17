@@ -5,6 +5,9 @@ let art = null;
 let hls = null;
 let activeMatchId = null;
 let isMobile = window.innerWidth < 768;
+let currentStreams = [];
+let currentStreamIndex = 0;
+let currentMatch = null; // { matchId, home, away, homeLogo, awayLogo, scoreStr }
 
 // Suppress all unhandled promise rejections from Artplayer's internal play() calls
 window.addEventListener('unhandledrejection', (e) => {
@@ -152,9 +155,90 @@ function hideOverlay() {
     document.getElementById('match-overlay').style.display = 'none';
 }
 
+// ===== STREAM SWITCHER =====
+function renderStreamButtons(streams) {
+    currentStreams = streams;
+    currentStreamIndex = 0;
+
+    const container = document.getElementById('stream-switcher');
+    container.innerHTML = '';
+
+    if (!streams || streams.length <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    streams.forEach((s, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'stream-btn' + (i === 0 ? ' active' : '');
+        btn.innerText = s.label || ('Stream ' + (i + 1));
+        btn.onclick = () => switchStream(i);
+        container.appendChild(btn);
+    });
+}
+
+function switchStream(i) {
+    if (!currentStreams[i] || i === currentStreamIndex) return;
+    currentStreamIndex = i;
+
+    document.querySelectorAll('.stream-btn').forEach((btn, idx) => {
+        btn.classList.toggle('active', idx === i);
+    });
+
+    if (!currentMatch) return;
+    play(
+        currentStreams[i].streamUrl,
+        currentMatch.matchId,
+        currentMatch.home,
+        currentMatch.away,
+        currentMatch.homeLogo,
+        currentMatch.awayLogo,
+        currentMatch.scoreStr
+    );
+}
+
 /**
- * PLAY STREAM — streamUrl is already a direct HLS .m3u8 URL from the API
+ * PLAY STREAM — streamUrl is already a direct HLS .m3u8 URL from the API.
+ * ArtPlayer does NOT auto-detect m3u8, so we must wire hls.js via customType.
  */
+function playM3u8(video, url, art) {
+    if (window.Hls && window.Hls.isSupported()) {
+        if (hls) {
+            hls.destroy();
+            hls = null;
+        }
+        hls = new window.Hls({
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 5,
+            enableWorker: true,
+        });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(window.Hls.Events.ERROR, function (event, data) {
+            if (!data.fatal) return;
+            switch (data.type) {
+                case window.Hls.ErrorTypes.NETWORK_ERROR:
+                    showToast('Network error, retrying…', 'warn');
+                    hls.startLoad();
+                    break;
+                case window.Hls.ErrorTypes.MEDIA_ERROR:
+                    hls.recoverMediaError();
+                    break;
+                default:
+                    showToast('Playback error', 'error');
+                    hls.destroy();
+                    break;
+            }
+        });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        video.src = url;
+    } else {
+        showToast('Unsupported playback format', 'error');
+    }
+}
+
 async function play(streamUrl, matchId, home, away, homeLogo, awayLogo, scoreStr) {
     if (!streamUrl) return;
 
@@ -163,6 +247,10 @@ async function play(streamUrl, matchId, home, away, homeLogo, awayLogo, scoreStr
     art = new Artplayer({
         container: '#player',
         url: streamUrl,
+        type: 'm3u8',
+        customType: {
+            m3u8: playM3u8,
+        },
         isLive: true,
         autoplay: true,
         muted: true,
@@ -430,12 +518,24 @@ function attachMatchClick(el, m, homeName, awayName, homeLogo, awayLogo, scoreSt
         const r = await fetch(`/api/stream/${m.id}`);
         const s = await r.json();
 
-        if (!s.streamUrl) {
+        const streams = Array.isArray(s.streams) ? s.streams : [];
+        if (!streams.length) {
+            document.getElementById('stream-switcher').style.display = 'none';
             showToast('No stream available for ' + homeName + ' vs ' + awayName, 'warn');
             return;
         }
 
-        play(s.streamUrl, m.id, homeName, awayName, homeLogo, awayLogo, scoreStr);
+        currentMatch = {
+            matchId: m.id,
+            home: homeName,
+            away: awayName,
+            homeLogo: homeLogo,
+            awayLogo: awayLogo,
+            scoreStr: scoreStr,
+        };
+
+        renderStreamButtons(streams);
+        play(streams[0].streamUrl, m.id, homeName, awayName, homeLogo, awayLogo, scoreStr);
 
         if (isMobileDevice()) {
             closeSidebar();

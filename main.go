@@ -29,6 +29,7 @@ func main() {
 	app.Get("/api/matches", handlers.GetMatches)
 	app.Get("/api/stream/:matchId", handlers.GetStream)
 	app.Get("/api/play-url", handlers.BuildPlayURL)
+	app.Get("/hls/*", handlers.ProxyHLS)
 
 	// static frontend (embedded — works regardless of CWD)
 	app.Use("/", filesystem.New(filesystem.Config{

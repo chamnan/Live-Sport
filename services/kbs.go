@@ -8,6 +8,31 @@ import (
 	"net/http"
 )
 
+// userAgent mimics a browser. The kbs388.com API returns a 404 for Go's
+// default User-Agent ("Go-http-client/1.1"), which broke stream playback.
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+var httpClient = &http.Client{}
+
+// getJSON fetches a URL with browser-like headers and returns the body bytes.
+func getJSON(url string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Referer", "https://www.kbs388.com/")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
 // Match represents a single fixture from the API.
 type Match struct {
 	ID                int         `json:"id"`
@@ -86,33 +111,29 @@ type StreamsResponse struct {
 	} `json:"meta"`
 }
 
-func GetStream(matchId string) (string, error) {
+func GetStreams(matchId string) ([]StreamEntry, error) {
 
 	url := fmt.Sprintf("https://www.kbs388.com/api/football/fixtures/%s/streams", matchId)
 	log.Printf("[UPSTREAM] GET %s", url)
 
-	resp, err := http.Get(url)
+	body, err := getJSON(url)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
 
 	var data StreamsResponse
 	if err := json.Unmarshal(body, &data); err != nil {
-		return "", fmt.Errorf("failed to parse streams: %w", err)
+		return nil, fmt.Errorf("failed to parse streams: %w", err)
 	}
 
 	if len(data.Data) == 0 {
 		log.Printf("[UPSTREAM] matchId=%s → no streams", matchId)
-		return "", nil
+		return nil, nil
 	}
 
-	hlsUrl := data.Data[0].HlsURL
-	log.Printf("[UPSTREAM] matchId=%s → hlsUrl=%s", matchId, hlsUrl)
+	log.Printf("[UPSTREAM] matchId=%s → %d streams", matchId, len(data.Data))
 
-	return hlsUrl, nil
+	return data.Data, nil
 }
 
 func FetchMatches(day string) (*FixturesResponse, error) {
@@ -123,13 +144,10 @@ func FetchMatches(day string) (*FixturesResponse, error) {
 	)
 	log.Printf("[UPSTREAM] GET %s", url)
 
-	resp, err := http.Get(url)
+	body, err := getJSON(url)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
 
 	var data FixturesResponse
 	if err := json.Unmarshal(body, &data); err != nil {
