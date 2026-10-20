@@ -59,7 +59,7 @@ func ProxyHLS(c *fiber.Ctx) error {
 	contentType := resp.Header.Get("Content-Type")
 	if resp.StatusCode != http.StatusOK {
 		c.Status(resp.StatusCode)
-		c.Type("text/plain")
+		c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 		return c.Send(body)
 	}
 
@@ -70,11 +70,14 @@ func ProxyHLS(c *fiber.Ctx) error {
 		strings.HasPrefix(string(body), "#EXTM3U")
 
 	if isPlaylist {
-		c.Type("application/vnd.apple.mpegurl")
+		c.Set(fiber.HeaderContentType, "application/vnd.apple.mpegurl")
 		return c.SendString(rewriteHLSPlaylist(string(body)))
 	}
 
-	c.Type(contentType)
+	if contentType == "" {
+		contentType = fiber.MIMEOctetStream
+	}
+	c.Set(fiber.HeaderContentType, contentType)
 	return c.Send(body)
 }
 
