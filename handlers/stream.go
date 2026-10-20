@@ -3,34 +3,29 @@ package handlers
 import (
 	"log"
 
-	"kbs-iptv/services"
-
 	"github.com/gofiber/fiber/v2"
+
+	"kbs-iptv/services"
 )
 
+// StreamInfo is a playable stream as returned to the frontend.
 type StreamInfo struct {
 	ID        string `json:"id"`
 	Label     string `json:"label"`
 	StreamURL string `json:"streamUrl"`
 }
 
+// GetStream returns the available streams for a match, with each HLS URL
+// rewritten to go through the same-origin /hls/ proxy.
 func GetStream(c *fiber.Ctx) error {
+	matchID := c.Params("matchId")
+	log.Printf("[API] GET /api/stream/%s", matchID)
 
-	matchId := c.Params("matchId")
-	log.Printf("[API] GET /api/stream/%s", matchId)
-
-	streams, err := services.GetStreams(matchId)
+	streams, err := services.GetStreams(matchID)
 	if err != nil {
-		log.Printf("[ERROR] GET /api/stream/%s → %v", matchId, err)
-		return c.Status(500).JSON(fiber.Map{
+		log.Printf("[ERROR] GET /api/stream/%s → %v", matchID, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
-		})
-	}
-
-	if len(streams) == 0 {
-		log.Printf("[API] GET /api/stream/%s → 200 (no stream)", matchId)
-		return c.JSON(fiber.Map{
-			"streams": []StreamInfo{},
 		})
 	}
 
@@ -45,8 +40,8 @@ func GetStream(c *fiber.Ctx) error {
 			StreamURL: ProxyHLSURL(s.HlsURL, base),
 		})
 	}
-	log.Printf("[API] GET /api/stream/%s → 200 (%d streams)", matchId, len(out))
 
+	log.Printf("[API] GET /api/stream/%s → 200 (%d streams)", matchID, len(out))
 	return c.JSON(fiber.Map{
 		"streams": out,
 	})

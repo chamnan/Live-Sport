@@ -5,8 +5,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+
+	"kbs-iptv/services"
 )
 
 // upstreamHLSBase is the host that serves HLS playlists (master + media).
@@ -15,11 +18,14 @@ import (
 // rewrite internal playlist URLs back to the local /hls/ path.
 const upstreamHLSBase = "https://football-backend-mlcakheg.on-forge.com/v1/football/hls/"
 
+// hlsClient fetches playlists from upstreamHLSBase. The timeout keeps a hung
+// upstream from tying up the proxy handler.
+var hlsClient = &http.Client{Timeout: 20 * time.Second}
+
 // ProxyHLSURL rewrites a direct upstream HLS URL into a same-origin proxy URL
 // so the browser only ever talks to this server for playlist requests.
 func ProxyHLSURL(raw, base string) string {
-	if strings.HasPrefix(raw, upstreamHLSBase) {
-		rest := strings.TrimPrefix(raw, upstreamHLSBase)
+	if rest, ok := strings.CutPrefix(raw, upstreamHLSBase); ok {
 		return strings.TrimRight(base, "/") + "/hls/" + rest
 	}
 	return raw
@@ -29,7 +35,7 @@ func ProxyHLSURL(raw, base string) string {
 func ProxyHLS(c *fiber.Ctx) error {
 	suffix := strings.TrimPrefix(c.Path(), "/hls/")
 	if suffix == "" {
-		return c.Status(http.StatusBadRequest).SendString("missing hls path")
+		return c.Status(fiber.StatusBadRequest).SendString("missing hls path")
 	}
 
 	upstreamURL := upstreamHLSBase + suffix
@@ -39,33 +45,32 @@ func ProxyHLS(c *fiber.Ctx) error {
 
 	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, upstreamURL, nil)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).SendString(err.Error())
+		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	req.Header.Set("Referer", "https://www.kbs388.com/")
+	req.Header.Set("User-Agent", services.UserAgent)
+	req.Header.Set("Referer", services.Referer)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := hlsClient.Do(req)
 	if err != nil {
 		log.Printf("[HLS] proxy error %s: %v", upstreamURL, err)
-		return c.Status(http.StatusBadGateway).SendString("upstream error")
+		return c.Status(fiber.StatusBadGateway).SendString("upstream error")
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return c.Status(http.StatusBadGateway).SendString("read error")
+		return c.Status(fiber.StatusBadGateway).SendString("read error")
 	}
 
-	contentType := resp.Header.Get("Content-Type")
 	if resp.StatusCode != http.StatusOK {
-		c.Status(resp.StatusCode)
 		c.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
-		return c.Send(body)
+		return c.Status(resp.StatusCode).Send(body)
 	}
 
 	// Playlists need their internal absolute URLs rewritten; segments (binary)
 	// are forwarded as-is. Segment hosts (liveplay1.camel4.live) already allow
 	// CORS *, so hls.js can fetch those directly.
+	contentType := resp.Header.Get(fiber.HeaderContentType)
 	isPlaylist := strings.Contains(contentType, "mpegurl") ||
 		strings.HasPrefix(string(body), "#EXTM3U")
 
@@ -90,8 +95,7 @@ func rewriteHLSPlaylist(content string) string {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if strings.HasPrefix(trimmed, upstreamHLSBase) {
-			rest := strings.TrimPrefix(trimmed, upstreamHLSBase)
+		if rest, ok := strings.CutPrefix(trimmed, upstreamHLSBase); ok {
 			lines[i] = "/hls/" + rest
 		}
 	}
