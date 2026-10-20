@@ -16,10 +16,8 @@ import (
 var webFS embed.FS
 
 func main() {
-
 	app := fiber.New()
 
-	// FIX CORS (frontend safe)
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
 		AllowHeaders: "*",

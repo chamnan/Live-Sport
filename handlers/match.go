@@ -3,59 +3,64 @@ package handlers
 import (
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
-	"kbs-iptv/services"
-
 	"github.com/gofiber/fiber/v2"
+
+	"kbs-iptv/services"
 )
 
-func GetMatches(c *fiber.Ctx) error {
+const dateLayout = "2006-01-02"
 
+// GetMatches returns yesterday's, today's and tomorrow's fixtures keyed by day.
+// Optional filters: ?isLive=true&hasStream=true
+func GetMatches(c *fiber.Ctx) error {
 	now := time.Now()
 	days := []string{
-		now.AddDate(0, 0, -1).Format("2006-01-02"), // yesterday
-		now.Format("2006-01-02"),                   // today
-		now.AddDate(0, 0, 1).Format("2006-01-02"),  // tomorrow
+		now.AddDate(0, 0, -1).Format(dateLayout), // yesterday
+		now.Format(dateLayout),                   // today
+		now.AddDate(0, 0, 1).Format(dateLayout),  // tomorrow
 	}
 
-	// Optional filters: ?isLive=true&hasStream=true
 	filterLive := c.Query("isLive")
 	filterStream := c.Query("hasStream")
 
 	log.Printf("[API] GET /api/matches → fetching %v (isLive=%q, hasStream=%q)", days, filterLive, filterStream)
 
-	result := make(map[string]interface{})
+	// Fetch all days in parallel; each upstream call can take ~10s.
+	type fetched struct {
+		data *services.FixturesResponse
+		err  error
+	}
+	responses := make([]fetched, len(days))
+	var wg sync.WaitGroup
+	for i, day := range days {
+		wg.Go(func() {
+			data, err := services.FetchMatches(day)
+			responses[i] = fetched{data, err}
+		})
+	}
+	wg.Wait()
 
-	for _, day := range days {
-		data, err := services.FetchMatches(day)
+	result := make(map[string]any, len(days))
+
+	for i, day := range days {
+		data, err := responses[i].data, responses[i].err
 		if err != nil {
 			log.Printf("[ERROR] GET /api/matches?day=%s → %v", day, err)
 			result[day] = fiber.Map{"error": err.Error()}
 			continue
 		}
 
-		// Apply isLive / hasStream filters if provided
 		matches := data.Data
 		if filterLive != "" {
 			live, _ := strconv.ParseBool(filterLive)
-			filtered := make([]services.Match, 0)
-			for _, m := range matches {
-				if m.IsLive == live {
-					filtered = append(filtered, m)
-				}
-			}
-			matches = filtered
+			matches = filterMatches(matches, func(m services.Match) bool { return m.IsLive == live })
 		}
 		if filterStream != "" {
 			stream, _ := strconv.ParseBool(filterStream)
-			filtered := make([]services.Match, 0)
-			for _, m := range matches {
-				if m.HasStream == stream {
-					filtered = append(filtered, m)
-				}
-			}
-			matches = filtered
+			matches = filterMatches(matches, func(m services.Match) bool { return m.HasStream == stream })
 		}
 
 		result[day] = fiber.Map{
@@ -64,9 +69,20 @@ func GetMatches(c *fiber.Ctx) error {
 		}
 	}
 
-	log.Printf("[API] GET /api/matches → 200 OK (3 days)")
+	log.Printf("[API] GET /api/matches → 200 OK (%d days)", len(days))
 	return c.JSON(fiber.Map{
 		"days":   days,
 		"result": result,
 	})
+}
+
+// filterMatches returns the matches for which keep returns true.
+func filterMatches(matches []services.Match, keep func(services.Match) bool) []services.Match {
+	filtered := make([]services.Match, 0, len(matches))
+	for _, m := range matches {
+		if keep(m) {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
 }
