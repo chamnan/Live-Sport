@@ -11,10 +11,6 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>⚽</text></svg>"
     />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/artplayer/dist/artplayer.css"
-    />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -32,6 +28,13 @@
             <span id="refresh-indicator">🔄 30s</span>
             <button id="btn-reload">⟳ Reload</button>
           </div>
+          <input
+            class="match-search"
+            type="search"
+            placeholder="🔍 Search team or league…"
+            autocomplete="off"
+            spellcheck="false"
+          />
           <div id="status"></div>
         </div>
         <div id="sidebar-scroll">
@@ -62,7 +65,16 @@
           <div id="player"></div>
           <div id="stream-switcher"></div>
         </div>
-        <!-- Mobile: match list below player -->
+        <!-- Mobile: search + match list below player -->
+        <div id="mobile-search-bar">
+          <input
+            class="match-search"
+            type="search"
+            placeholder="🔍 Search team or league…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
         <div id="mobile-match-list"></div>
       </div>
     </div>

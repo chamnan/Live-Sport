@@ -8,6 +8,9 @@ let isMobile = window.innerWidth < 768;
 let currentStreams = [];
 let currentStreamIndex = 0;
 let currentMatch = null; // { matchId, home, away, homeLogo, awayLogo, scoreStr }
+let lastDayGroups = {};   // last loaded matches, unfiltered
+let lastDays = [];
+let searchQuery = '';
 
 // Suppress all unhandled promise rejections from Artplayer's internal play() calls
 window.addEventListener('unhandledrejection', (e) => {
@@ -301,7 +304,9 @@ async function loadMatches() {
         }
     });
 
-    render(dayGroups, days);
+    lastDayGroups = dayGroups;
+    lastDays = days;
+    renderFiltered();
 
     // Update overlay for currently playing match (scores may have changed)
     if (activeMatchId && document.getElementById('match-overlay').style.display === 'flex') {
@@ -380,6 +385,70 @@ function normalizeGroups(matches) {
     }
 
     return groups;
+}
+
+// ===== SEARCH =====
+// Lowercase and strip accents so "sao paulo" matches "São Paulo".
+function normalizeText(str) {
+    return String(str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+// Keep only matches whose team or competition names contain every search term.
+function filterDayGroups(dayGroups, query) {
+    const terms = normalizeText(query).split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return dayGroups;
+
+    const filtered = {};
+    for (const day of Object.keys(dayGroups)) {
+        const groups = dayGroups[day]
+            .map(group => {
+                const items = group.items
+                    .map(item => {
+                        const compName = (item.competition && item.competition.name) || '';
+                        const match = (item.match || []).filter(m => {
+                            if (!m || !m.home || !m.away) return false;
+                            const haystack = normalizeText(m.home.name + ' ' + m.away.name + ' ' + compName);
+                            return terms.every(t => haystack.includes(t));
+                        });
+                        return { ...item, match };
+                    })
+                    .filter(item => item.match.length > 0);
+                return { ...group, items };
+            })
+            .filter(group => group.items.length > 0);
+
+        if (groups.length > 0) filtered[day] = groups;
+    }
+    return filtered;
+}
+
+function renderFiltered() {
+    render(filterDayGroups(lastDayGroups, searchQuery), lastDays);
+}
+
+function setSearchQuery(value) {
+    document.querySelectorAll('.match-search').forEach(input => {
+        if (input.value !== value) input.value = value;
+    });
+    searchQuery = value.trim();
+    renderFiltered();
+}
+
+function setupSearch() {
+    let debounceTimer = null;
+    document.querySelectorAll('.match-search').forEach(input => {
+        input.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => setSearchQuery(input.value), 150);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                clearTimeout(debounceTimer);
+                setSearchQuery('');
+                input.blur();
+            }
+        });
+    });
 }
 
 // ===== RENDER =====
@@ -597,7 +666,7 @@ function renderGroup(cat) {
     return catDiv;
 }
 
-function renderDateAccordion(day, groups) {
+function renderDateAccordion(day, groups, expanded) {
     const container = document.createElement("div");
     container.className = "category date-accordion";
 
@@ -608,10 +677,10 @@ function renderDateAccordion(day, groups) {
     const body = document.createElement("div");
     body.className = "cat-body";
 
-    // Start expanded for today
+    // Start expanded for today (or for every day when searching)
     const todayStr = new Date().toISOString().slice(0, 10);
     const isToday = day === todayStr;
-    if (!isToday) {
+    if (!isToday && !expanded) {
         body.style.display = "none";
         header.classList.add('collapsed');
     }
@@ -645,14 +714,18 @@ function render(dayGroups, days) {
         if (!groups || groups.length === 0) return;
         hasContent = true;
 
-        const desktopAcc = renderDateAccordion(day, groups);
-        const mobileAcc = renderDateAccordion(day, groups);
+        const expanded = searchQuery !== '';
+        const desktopAcc = renderDateAccordion(day, groups, expanded);
+        const mobileAcc = renderDateAccordion(day, groups, expanded);
         desktopList.appendChild(desktopAcc);
         mobileList.appendChild(mobileAcc);
     });
 
     if (!hasContent) {
-        const empty = '<div class="empty-state"><div class="empty-icon">📭</div><div>No matches found</div></div>';
+        const message = searchQuery
+            ? 'No matches for “' + escapeHtml(searchQuery) + '”'
+            : 'No matches found';
+        const empty = '<div class="empty-state"><div class="empty-icon">📭</div><div>' + message + '</div></div>';
         desktopList.innerHTML = empty;
         mobileList.innerHTML = empty;
     }
@@ -727,6 +800,7 @@ function manualRefresh() {
 }
 
 // ===== INIT =====
+setupSearch();
 loadMatches();
 startCountdown();
 

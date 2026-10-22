@@ -156,6 +156,34 @@ body {
     animation: pulse 1s ease-in-out infinite;
 }
 
+/* ===== SEARCH ===== */
+.match-search {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: var(--font);
+    outline: none;
+    -webkit-user-select: text;
+    user-select: text;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.match-search::placeholder { color: var(--text-dim); }
+
+.match-search:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+#mobile-search-bar {
+    display: none;
+}
+
 #status {
     font-size: 11px;
     color: var(--accent);
@@ -742,6 +770,20 @@ body {
     #mobile-match-list .category {
         margin: 6px 8px;
     }
+
+    /* Search sits above the mobile match list; the drawer copy is hidden */
+    #mobile-search-bar {
+        display: block;
+        flex-shrink: 0;
+        padding: 0 8px 8px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+    }
+
+    #sidebar-header .match-search { display: none; }
+
+    /* 16px stops iOS Safari zooming in on focus */
+    .match-search { font-size: 16px; }
 
     /* Mobile nav bar */
     #mobile-nav { display: flex; }
