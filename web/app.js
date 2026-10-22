@@ -678,7 +678,11 @@ function renderDateAccordion(day, groups, expanded) {
     body.className = "cat-body";
 
     // Start expanded for today (or for every day when searching)
-    const todayStr = new Date().toISOString().slice(0, 10);
+    // Use the local date; toISOString() is UTC and is off by a day near midnight.
+    const now = new Date();
+    const todayStr = now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0');
     const isToday = day === todayStr;
     if (!isToday && !expanded) {
         body.style.display = "none";
