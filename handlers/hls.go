@@ -20,7 +20,7 @@ const upstreamHLSBase = "https://football-backend-mlcakheg.on-forge.com/v1/footb
 
 // hlsClient fetches playlists from upstreamHLSBase. The timeout keeps a hung
 // upstream from tying up the proxy handler.
-var hlsClient = &http.Client{Timeout: 20 * time.Second}
+var hlsClient = &http.Client{Timeout: 30 * time.Second}
 
 // ProxyHLSURL rewrites a direct upstream HLS URL into a same-origin proxy URL
 // so the browser only ever talks to this server for playlist requests.
